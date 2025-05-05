@@ -153,7 +153,7 @@ rm -rf "$TEMP_DIR"
 print_message "$YELLOW" "Checking for AMD GPU..."
 
 # Check for AMD GPU
-if lspci | grep -qi 'amd.*vga'; then
+if lspci | grep -qi 'amd\|advanced micro devices.*\[amd\]\|radeon'; then
   print_message "$GREEN" "AMD GPU detected. Setting up ROCm repository and drivers..."
   
   # Install additional dependencies for AMD GPU setup
