@@ -22,6 +22,40 @@ RED='\033[0;31m'
 YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 
+# Disk selection options
+DISK_OPTIONS=(
+  "nvme0n1" 
+  "nvme0n2" 
+  "nvme0n3" 
+  "nvme0n4"
+  "sda"
+  "sdb"
+  "sdc"
+  "sdd"
+  "custom"
+)
+
+# Function to select disk for installation
+select_disk() {
+  echo -e "${GREEN}Please select the target disk for installation:${NC}"
+  
+  select disk_option in "${DISK_OPTIONS[@]}"; do
+    if [[ "$disk_option" == "custom" ]]; then
+      echo -e "${YELLOW}Please enter a custom disk identifier (e.g., nvme1n1, vda):${NC}"
+      read -r custom_disk
+      export target_disk="$custom_disk"
+      echo -e "${GREEN}Selected custom disk: ${target_disk}${NC}"
+      break
+    elif [[ -n "$disk_option" ]]; then
+      export target_disk="$disk_option"
+      echo -e "${GREEN}Selected disk: ${target_disk}${NC}"
+      break
+    else
+      echo -e "${RED}Invalid selection. Please try again.${NC}"
+    fi
+  done
+}
+
 # Check if .env file exists
 if [ ! -f "${ENV_FILE}" ]; then
   echo -e "${RED}Error: .env file not found at ${ENV_FILE}${NC}"
@@ -40,6 +74,9 @@ fi
 # Create output directory if it doesn't exist
 mkdir -p "${OUTPUT_DIR}"
 
+# Select the target disk interactively
+select_disk
+
 # Load the environment variables
 echo -e "${GREEN}Loading environment variables from ${ENV_FILE}...${NC}"
 set -a # automatically export all variables
@@ -57,6 +94,7 @@ required_vars=(
   "username"
   "userpassword_crypted"
   "rootpassword_crypted"
+  "target_disk" # Add target_disk as a required variable
 )
 
 missing_vars=0
@@ -114,6 +152,9 @@ if ! command -v envsubst &> /dev/null; then
       sed -i.bak "s|\\\${$key}|$value|g" "${OUTPUT_FILE}"
     fi
   done < "${ENV_FILE}"
+  
+  # Replace target_disk variable (from interactive selection)
+  sed -i.bak "s|\\\${target_disk}|$target_disk|g" "${OUTPUT_FILE}"
   
   # Clean up backup file
   rm -f "${OUTPUT_FILE}.bak"

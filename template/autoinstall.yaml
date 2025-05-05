@@ -33,18 +33,18 @@ autoinstall:
         lock_passwd: false
         hashed_passwd: "${rootpassword_crypted}"
   
-  # Storage configuration with direct nvme0n1 targeting for UEFI
+  # Storage configuration with target disk variable
   storage:
     config:
       - type: disk
-        id: disk-nvme
-        path: /dev/nvme0n1
+        id: disk-target
+        path: /dev/${target_disk}
         ptable: gpt
         wipe: superblock
         preserve: false
       - type: partition
         id: efi-partition
-        device: disk-nvme
+        device: disk-target
         size: 512MB
         flag: boot
         grub_device: true
@@ -57,7 +57,7 @@ autoinstall:
         preserve: false
       - type: partition
         id: boot-partition
-        device: disk-nvme
+        device: disk-target
         size: 1GB
         number: 2
         preserve: false
@@ -68,7 +68,7 @@ autoinstall:
         preserve: false
       - type: partition
         id: root-partition
-        device: disk-nvme
+        device: disk-target
         size: -1
         number: 3
         preserve: false
@@ -101,26 +101,31 @@ autoinstall:
     update: true
     upgrade: true
   
-  # Early commands to verify nvme0n1 exists
+  # Early commands to verify target_disk exists
   early-commands:
     - |
       #!/bin/bash
-      # Verify nvme0n1 exists
-      if [ ! -b /dev/nvme0n1 ]; then
-        echo "ERROR: /dev/nvme0n1 does not exist"
-        echo "This autoinstall is configured specifically for systems with NVMe drives."
+      # Verify target disk exists
+      if [ ! -b /dev/${target_disk} ]; then
+        echo "ERROR: /dev/${target_disk} does not exist"
+        echo "This autoinstall is configured specifically for the selected disk."
         echo "Installation will be aborted."
         sleep 10
         exit 1
       fi
       
-      echo "Target disk /dev/nvme0n1 found, proceeding with installation."
+      echo "Target disk /dev/${target_disk} found, proceeding with installation."
   
   # Late commands (equivalent to preseed/late_command)
   late-commands:
-    # Ensure user and group exist
+    # Ensure user exists before proceeding
+    - curtin in-target --target=/target -- bash -c "id ${username} || useradd -m -s /bin/bash -g ${username} ${username}"
+    - curtin in-target --target=/target -- usermod -p '${userpassword_crypted}' ${username}
+    - curtin in-target --target=/target -- usermod -U ${username}
+
+    # Ensure group exists
     - curtin in-target --target=/target -- bash -c "getent group ${username} || groupadd ${username}"
-    
+
     # Clone repository (split into two commands)
     - curtin in-target --target=/target -- bash -c "git clone https://github.com/clearcmos/deb-preseed /home/${username}/deb-preseed" 
     - curtin in-target --target=/target -- bash -c "chown -R ${username}:${username} /home/${username}/deb-preseed"
@@ -156,7 +161,6 @@ autoinstall:
     - curtin in-target --target=/target -- bash -c "sed -i 's/^# set autoindent/set autoindent/g' /etc/nanorc"
     
     # Docker and group setup
-    - curtin in-target --target=/target -- bash -c "mkdir -p /home/${username}/deb-preseed/hosts/misc/docker-compose/traefik && touch /home/${username}/deb-preseed/hosts/misc/docker-compose/traefik/acme.json && chmod 600 /home/${username}/deb-preseed/hosts/misc/docker-compose/traefik/acme.json && chown ${username}:${username} /home/${username}/deb-preseed/hosts/misc/docker-compose/traefik/acme.json"
     - curtin in-target --target=/target -- bash -c "usermod -aG docker ${username}"
     - curtin in-target --target=/target -- bash -c "groupadd secrets || true"
     - curtin in-target --target=/target -- bash -c "usermod -aG secrets ${username}"
