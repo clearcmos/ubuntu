@@ -1,3 +1,24 @@
 .DS_Store
 output/
 **/*.env
+
+# Data directories that shouldn't be committed
+auto-ollama/ollama_data/*
+auto-ollama/webui_data/*
+
+# But keep the scripts from ollama_data
+!auto-ollama/ollama_data/custom_entrypoint.sh
+!auto-ollama/ollama_data/setup_custom_model.sh
+
+# Ignore the fake_sys directory
+auto-ollama/ollama_data/fake_sys/
+
+# Keep the modelfile directory but not its contents
+auto-ollama/modelfile/*
+
+# Temporary files
+*.log
+*.tmp
+
+# OS specific files
+Thumbs.db

@@ -5,10 +5,13 @@ services:
     container_name: ollama
     privileged: true
     restart: always
+    # Use custom entrypoint to set up the model
+    entrypoint: ["/bin/bash", "/root/.ollama/custom_entrypoint.sh"]
     ports:
       - "${OLLAMA_PORT:-11434}:11434"
     volumes:
       - ./ollama_data:/root/.ollama
+      - ./ollama_data/fake_sys/module/amdgpu:/sys/module/amdgpu
     group_add:
       - "992"
       - "video"
@@ -18,7 +21,7 @@ services:
     environment:
       - HSA_OVERRIDE_GFX_VERSION=10.3.0
       - HSA_ENABLE_SDMA=1
-      - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_FLASH_ATTENTION=true
       - OLLAMA_KV_CACHE_TYPE=q8_0
       - OLLAMA_MAX_INPUT_TOKENS=131072
       - OLLAMA_CONTEXT_LENGTH=131072
@@ -27,6 +30,7 @@ services:
       - ROCR_VISIBLE_DEVICES=all
       - GPU_MAX_HEAP_SIZE=100
       - GPU_SINGLE_ALLOC_PERCENT=100
+      - AMD_GPU=1
       
   open-webui:
     image: ${WEBUI_IMAGE:-ghcr.io/open-webui/open-webui:main}
