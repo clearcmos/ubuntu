@@ -169,7 +169,7 @@ if lspci | grep -qi 'amd\|advanced micro devices.*\[amd\]\|radeon'; then
   
   # Add the ROCm repository
   print_message "$YELLOW" "Adding ROCm repository..."
-  echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.4 ubuntu main" | sudo tee /etc/apt/sources.list.d/rocm.list > /dev/null
+  echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/6.4 noble main" | sudo tee /etc/apt/sources.list.d/rocm.list > /dev/null
   check_success "Adding ROCm repository" $?
   
   # Update package lists again

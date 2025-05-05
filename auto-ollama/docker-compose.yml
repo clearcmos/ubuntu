@@ -1,0 +1,88 @@
+version: '3.8'
+
+services:
+  ollama:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:rocm}
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=${HSA_OVERRIDE_GFX_VERSION:-10.3.0}
+      - HSA_ENABLE_SDMA=${HSA_ENABLE_SDMA:-1}
+      - GPU_MAX_HEAP_SIZE=${GPU_MAX_HEAP_SIZE:-100}
+      - GPU_SINGLE_ALLOC_PERCENT=${GPU_SINGLE_ALLOC_PERCENT:-100}
+      - OLLAMA_ROCM=${OLLAMA_ROCM:-1}
+      - OLLAMA_FLASH_ATTENTION=${OLLAMA_FLASH_ATTENTION:-1}
+      - OLLAMA_KV_CACHE_TYPE=${OLLAMA_KV_CACHE_TYPE:-q8_0}
+      - OLLAMA_MAX_INPUT_TOKENS=${OLLAMA_MAX_INPUT_TOKENS:-131072}
+      - OLLAMA_CONTEXT_LENGTH=${OLLAMA_CONTEXT_LENGTH:-131072}
+      - OLLAMA_KEEP_ALIVE=${OLLAMA_KEEP_ALIVE:--1}
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri
+    deploy:
+      resources:
+        limits:
+          memory: 16G
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/version || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  ollama-model-init:
+    image: ${OLLAMA_IMAGE:-ollama/ollama:rocm}
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ./ollama_data:/root/.ollama
+      - ./modelfile:/modelfile
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: ["/bin/sh", "-c"]
+    command: |
+      set -e
+      
+      # Pull the base model
+      ollama pull qwen2.5-coder:7b
+      
+      # Check if our custom model already exists
+      if ! ollama list | grep -q "qwen2.5-coder-128k"; then
+        echo "Creating qwen2.5-coder-128k model with extended context window..."
+        ollama create qwen2.5-coder-128k -f /modelfile/Modelfile
+        echo "Model created successfully!"
+      else
+        echo "qwen2.5-coder-128k model already exists."
+      fi
+
+  open-webui:
+    image: ${WEBUI_IMAGE:-ghcr.io/open-webui/open-webui:main}
+    container_name: open-webui
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    ports:
+      - "${WEBUI_PORT:-8080}:8080"
+    volumes:
+      - ./webui_data:/app/backend/data
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-changeme}
+      - HOST=${WEBUI_HOST:-0.0.0.0}
+      - PORT=${WEBUI_PORT_INTERNAL:-8080}
+      - WEBUI_AUTH=${WEBUI_AUTH:-true}
+      - WEBUI_CORS=${WEBUI_CORS:-false}
+      - WEBUI_DB=${WEBUI_DB:-sqlite}
+      - WEBUI_ALLOW_PASSWORDLESS_USER_CREATION=${WEBUI_ALLOW_PASSWORDLESS_USER_CREATION:-false}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

@@ -1,0 +1,5 @@
+FROM qwen2.5-coder:7b
+PARAMETER num_ctx 131072
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+PARAMETER repeat_penalty 1.1
