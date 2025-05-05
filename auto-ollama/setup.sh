@@ -33,7 +33,7 @@ install_docker() {
   sudo apt-get update
   
   # Install prerequisites
-  sudo apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
+  sudo apt-get install -y apt-transport-https ca-certificates curl python3-setuptools gnupg lsb-release 
   
   # Add Docker's official GPG key
   curl -fsSL https://download.docker.com/linux/$OS_NAME/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
