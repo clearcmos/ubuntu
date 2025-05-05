@@ -90,6 +90,15 @@ if [ ! -d "/dev/dri" ] || [ ! -e "/dev/kfd" ]; then
   print_message "$YELLOW" "If you have an AMD GPU, please check your drivers installation."
 fi
 
+# Get render group ID for docker-compose.yml
+RENDER_GROUP_ID=$(getent group render | cut -d: -f3)
+if [ -z "$RENDER_GROUP_ID" ]; then
+  print_message "$YELLOW" "Render group not found. Using default group ID of 992."
+  RENDER_GROUP_ID=992
+else
+  print_message "$GREEN" "Found render group with ID: $RENDER_GROUP_ID"
+fi
+
 # Create required directories
 print_message "$YELLOW" "Creating required directories..."
 mkdir -p ./ollama_data ./webui_data ./modelfile
@@ -106,25 +115,66 @@ else
   print_message "$GREEN" "Modelfile already exists."
 fi
 
+# Create docker-compose.yml file
+print_message "$YELLOW" "Creating docker-compose.yml file..."
+cat > ./docker-compose.yml << EOF
+version: '3'
+services:
+  ollama:
+    image: ollama/ollama:rocm
+    container_name: ollama
+    privileged: true
+    restart: always
+    ports:
+      - "\${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama
+    group_add:
+      - "${RENDER_GROUP_ID:-992}"
+      - "video"
+    devices:
+      - "/dev/kfd"
+      - "/dev/dri"
+    environment:
+      - HSA_OVERRIDE_GFX_VERSION=10.3.0
+      - HSA_ENABLE_SDMA=1
+      - OLLAMA_FLASH_ATTENTION=1
+      - OLLAMA_KV_CACHE_TYPE=q8_0
+      - OLLAMA_MAX_INPUT_TOKENS=131072
+      - OLLAMA_CONTEXT_LENGTH=131072
+      - OLLAMA_KEEP_ALIVE=-1
+      - ROCM_PATH=/opt/rocm
+      - ROCR_VISIBLE_DEVICES=all
+      - GPU_MAX_HEAP_SIZE=100
+      - GPU_SINGLE_ALLOC_PERCENT=100
+      
+  open-webui:
+    image: \${WEBUI_IMAGE:-ghcr.io/open-webui/open-webui:main}
+    container_name: open-webui
+    restart: always
+    volumes:
+      - ./webui_data:/app/backend/data
+    ports:
+      - "\${WEBUI_PORT:-8080}:\${WEBUI_PORT_INTERNAL:-8080}"
+    environment:
+      - OLLAMA_API_BASE_URL=http://ollama:11434
+      - WEBUI_SECRET_KEY=\${WEBUI_SECRET_KEY:-change_this_to_a_secure_random_string}
+      - WEBUI_AUTH=\${WEBUI_AUTH:-true}
+      - WEBUI_CORS=\${WEBUI_CORS:-false}
+      - WEBUI_HOST=\${WEBUI_HOST:-0.0.0.0}
+      - WEBUI_PORT=\${WEBUI_PORT_INTERNAL:-8080}
+      - WEBUI_DB=\${WEBUI_DB:-sqlite}
+      - WEBUI_ALLOW_PASSWORDLESS_USER_CREATION=\${WEBUI_ALLOW_PASSWORDLESS_USER_CREATION:-false}
+    depends_on:
+      - ollama
+EOF
+
 # Check if .env file exists, create it if not
 if [ ! -f "./.env" ]; then
   print_message "$YELLOW" "Creating .env file with default values..."
   cat > ./.env << 'EOF'
 # Ollama configuration
-OLLAMA_IMAGE=ollama/ollama:rocm
 OLLAMA_PORT=11434
-
-# AMD GPU optimization settings for RDNA2 (AMD 6800 XT)
-HSA_OVERRIDE_GFX_VERSION=10.3.0
-HSA_ENABLE_SDMA=1
-GPU_MAX_HEAP_SIZE=100
-GPU_SINGLE_ALLOC_PERCENT=100
-OLLAMA_ROCM=1
-OLLAMA_FLASH_ATTENTION=1
-OLLAMA_KV_CACHE_TYPE=q8_0
-OLLAMA_MAX_INPUT_TOKENS=131072
-OLLAMA_CONTEXT_LENGTH=131072
-OLLAMA_KEEP_ALIVE=-1
 
 # OpenWebUI configuration
 WEBUI_IMAGE=ghcr.io/open-webui/open-webui:main
@@ -143,22 +193,18 @@ else
   print_message "$GREEN" ".env file already exists."
 fi
 
-# Make sure we have access to GPU devices
-print_message "$YELLOW" "Checking for AMD GPU devices..."
-if [ ! -d "/dev/dri" ] || [ ! -e "/dev/kfd" ]; then
-  print_message "$RED" "Warning: AMD GPU devices not found or not accessible. Please make sure your AMD GPU is properly installed."
-  print_message "$YELLOW" "The container might still work, but without GPU acceleration."
-else
-  print_message "$GREEN" "AMD GPU devices found."
-fi
+# Add current user to video and render groups
+print_message "$YELLOW" "Adding current user to video and render groups..."
+sudo usermod -aG video,render $USER
+print_message "$GREEN" "User added to groups! You may need to log out and back in for these changes to take effect."
 
 # Grant appropriate permissions to the devices
 print_message "$YELLOW" "Setting device permissions..."
 if [ -e "/dev/kfd" ]; then
-  sudo chmod 666 /dev/kfd
+  sudo chmod a+rw /dev/kfd
 fi
 if [ -d "/dev/dri" ]; then
-  sudo chmod -R 666 /dev/dri/*
+  sudo chmod -R a+rw /dev/dri/
 fi
 
 # Start the containers
@@ -179,9 +225,10 @@ if docker-compose ps | grep -q "Up"; then
   print_message "$GREEN" "You can access OpenWebUI at http://${IP_ADDRESS}:${WEBUI_PORT:-8080}"
   print_message "$GREEN" "Ollama API is available at http://${IP_ADDRESS}:${OLLAMA_PORT:-11434}"
   print_message "$YELLOW" "Note: The model installation may take some time in the background."
-  print_message "$YELLOW" "Check the logs with: docker-compose logs -f ollama-model-init"
+  print_message "$YELLOW" "Check the logs with: docker-compose logs -f ollama"
 else
   print_message "$RED" "Some containers might not be running. Please check with 'docker-compose ps'"
 fi
 
 print_message "$GREEN" "Setup complete! 🚀"
+print_message "$YELLOW" "You may need to log out and log back in for group permission changes to take effect."
