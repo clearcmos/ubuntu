@@ -144,22 +144,73 @@ fi
 # Clean up temp directory
 rm -rf "$TEMP_DIR"
 
-# Set up memory optimizations in shell profile
-SHELL_PROFILE="$HOME/.bashrc"
-OPTIMIZATION_VARS="export OLLAMA_FLASH_ATTENTION=1\nexport OLLAMA_KV_CACHE_TYPE=q8_0\nexport OLLAMA_MAX_INPUT_TOKENS=131072\nexport OLLAMA_CONTEXT_LENGTH=131072"
+# PART 2: AMD GPU / ROCm SETUP FOR UBUNTU 24.04 (NOBLE)
+print_message "$YELLOW" "Setting up AMD GPU support for Ubuntu 24.04 (Noble Numbat)..."
 
-# Check if optimizations are already in shell profile
-if ! grep -q "OLLAMA_FLASH_ATTENTION" "$SHELL_PROFILE" || ! grep -q "OLLAMA_KV_CACHE_TYPE" "$SHELL_PROFILE" || ! grep -q "OLLAMA_MAX_INPUT_TOKENS" "$SHELL_PROFILE"; then
-  print_message "$YELLOW" "Adding memory optimization variables to $SHELL_PROFILE..."
-  echo -e "\n# Ollama memory optimizations for large context windows" >> "$SHELL_PROFILE"
-  echo -e "$OPTIMIZATION_VARS" >> "$SHELL_PROFILE"
-  print_message "$GREEN" "Memory optimization variables added to $SHELL_PROFILE."
-  print_message "$YELLOW" "Please run 'source $SHELL_PROFILE' to apply these changes to your current shell."
+# Check for AMD GPU
+if lspci | grep -i amd | grep -i vga > /dev/null; then
+  print_message "$GREEN" "AMD GPU detected. Installing latest supported AMD GPU drivers..."
+  
+  # Setup proper repository keys
+  if [ ! -f "/etc/apt/keyrings/rocm.gpg" ]; then
+    print_message "$YELLOW" "Setting up ROCm repository keys..."
+    sudo mkdir -p /etc/apt/keyrings
+    wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | sudo gpg --dearmor --yes -o /etc/apt/keyrings/rocm.gpg
+  fi
+  
+  # Use the latest supported AMDGPU installer
+  print_message "$YELLOW" "Downloading and installing AMDGPU installer for Ubuntu 24.04..."
+  AMDGPU_VERSION="6.4.60400-1"
+  INSTALLER_URL="https://repo.radeon.com/amdgpu-install/6.4/ubuntu/noble/amdgpu-install_${AMDGPU_VERSION}_all.deb"
+  
+  wget $INSTALLER_URL -O /tmp/amdgpu-install.deb || {
+    print_message "$YELLOW" "Unable to download Noble-specific AMDGPU installer. Using most recent available version..."
+    # If Noble package is not available, try to download from the latest path
+    INSTALLER_URL="https://repo.radeon.com/amdgpu-install/latest/ubuntu/noble/amdgpu-install_latest_all.deb"
+    wget $INSTALLER_URL -O /tmp/amdgpu-install.deb || {
+      print_message "$RED" "Failed to download AMDGPU installer. Please check Internet connection."
+      exit 1
+    }
+  }
+  
+  sudo apt install -y /tmp/amdgpu-install.deb || {
+    print_message "$RED" "Failed to install AMDGPU installer package."
+    exit 1
+  }
+  
+  sudo apt update
+  
+  # Install ROCm components but not with DKMS to avoid kernel module issues
+  print_message "$YELLOW" "Installing ROCm components (without DKMS)..."
+  sudo amdgpu-install --usecase=rocm --no-dkms -y || {
+    print_message "$RED" "Failed to install ROCm components."
+    print_message "$YELLOW" "Trying alternative installation method..."
+    sudo amdgpu-install --usecase=rocm,hip,opencl --no-dkms -y || {
+      print_message "$RED" "Failed to install AMD GPU drivers. Continuing with basic ROCm optimization variables."
+    }
+  }
+  
+  # Set up AMD GPU optimizations in shell profile
+  SHELL_PROFILE="$HOME/.bashrc"
+  OPTIMIZATION_VARS="export OLLAMA_FLASH_ATTENTION=1\nexport OLLAMA_KV_CACHE_TYPE=q8_0\nexport OLLAMA_MAX_INPUT_TOKENS=131072\nexport OLLAMA_CONTEXT_LENGTH=131072\nexport OLLAMA_ROCM=1"
 else
-  print_message "$GREEN" "Memory optimization variables are already in $SHELL_PROFILE."
+  # Set up standard memory optimizations
+  SHELL_PROFILE="$HOME/.bashrc"
+  OPTIMIZATION_VARS="export OLLAMA_FLASH_ATTENTION=1\nexport OLLAMA_KV_CACHE_TYPE=q8_0\nexport OLLAMA_MAX_INPUT_TOKENS=131072\nexport OLLAMA_CONTEXT_LENGTH=131072"
 fi
 
-# PART 2: OPENWEBUI SETUP
+# Check if optimizations are already in shell profile
+if ! grep -q "OLLAMA_FLASH_ATTENTION" "$SHELL_PROFILE" || ! grep -q "OLLAMA_KV_CACHE_TYPE" "$SHELL_PROFILE" || ! grep -q "OLLAMA_MAX_INPUT_TOKENS" "$SHELL_PROFILE" || (lspci | grep -i amd | grep -i vga > /dev/null && ! grep -q "OLLAMA_ROCM" "$SHELL_PROFILE"); then
+  print_message "$YELLOW" "Adding optimization variables to $SHELL_PROFILE..."
+  echo -e "\n# Ollama optimizations for large context windows" >> "$SHELL_PROFILE"
+  echo -e "$OPTIMIZATION_VARS" >> "$SHELL_PROFILE"
+  print_message "$GREEN" "Optimization variables added to $SHELL_PROFILE."
+  print_message "$YELLOW" "Please run 'source $SHELL_PROFILE' to apply these changes to your current shell."
+else
+  print_message "$GREEN" "Optimization variables are already in $SHELL_PROFILE."
+fi
+
+# PART 3: OPENWEBUI SETUP
 # Create openwebui directory if it doesn't exist
 OPENWEBUI_DIR="$HOME/openwebui"
 if [[ ! -d "$OPENWEBUI_DIR" ]]; then
@@ -173,28 +224,37 @@ fi
 cd "$OPENWEBUI_DIR"
 print_message "$GREEN" "Changed to directory: $(pwd)"
 
-# Install uv if not already installed
+# Install uv using the official installer script
 if ! command_exists uv; then
   print_message "$YELLOW" "Installing uv package manager..."
-  pip install uv || {
-    print_message "$RED" "Failed to install uv. Trying with sudo..."
-    sudo pip install uv || {
-      print_message "$RED" "Failed to install uv. Please install it manually."
-      exit 1
-    }
+  curl -LsSf https://astral.sh/uv/install.sh | sh || {
+    print_message "$RED" "Failed to install uv. Please install it manually."
+    exit 1
   }
+  
+  # Source the environment to make uv available in the current shell session
+  if [ -f "$HOME/.local/bin/env" ]; then
+    print_message "$YELLOW" "Sourcing environment to add uv to PATH..."
+    source "$HOME/.local/bin/env"
+  else
+    # Fallback PATH update if env file doesn't exist
+    print_message "$YELLOW" "Adding uv to PATH manually..."
+    export PATH="$HOME/.local/bin:$PATH"
+  fi
+  
+  # Verify uv is now in PATH
+  if ! command_exists uv; then
+    print_message "$RED" "Failed to add uv to PATH. Please run the script again after running 'source $HOME/.local/bin/env'"
+    exit 1
+  fi
 else
   print_message "$GREEN" "uv package manager is already installed."
 fi
 
 # Check if a virtual environment already exists
-if [[ ! -d ".venv" ]]; then
+if [[ ! -d "open-webui" ]]; then
   print_message "$YELLOW" "Setting up a new virtual environment..."
-  uv init --python=3.11 . || {
-    print_message "$RED" "Failed to initialize virtual environment."
-    exit 1
-  }
-  uv venv || {
+  uv venv --python 3.11 --seed open-webui || {
     print_message "$RED" "Failed to create virtual environment."
     exit 1
   }
@@ -202,25 +262,53 @@ else
   print_message "$GREEN" "Virtual environment already exists."
 fi
 
-# Activate the virtual environment
+# Activate the virtual environment with error handling for broken pipe
 print_message "$YELLOW" "Activating virtual environment..."
-source .venv/bin/activate || {
-  print_message "$RED" "Failed to activate virtual environment."
-  exit 1
-}
-
-# Check if Open WebUI is installed
-if ! pip list | grep -q "open-webui"; then
-  print_message "$YELLOW" "Installing Open WebUI..."
-  uv pip install open-webui || {
-    print_message "$RED" "Failed to install Open WebUI."
+{ source open-webui/bin/activate > /dev/null 2>&1 || true; } 
+# Check if activation was successful by verifying Python path
+if [[ "$(which python)" != *"open-webui"* ]]; then
+  print_message "$RED" "Failed to activate virtual environment. Trying alternative method..."
+  # Alternative activation method
+  ACTIVATE_SCRIPT="$PWD/open-webui/bin/activate"
+  if [ -f "$ACTIVATE_SCRIPT" ]; then
+    set +e  # Don't exit on error temporarily
+    . "$ACTIVATE_SCRIPT"
+    set -e  # Restore exit on error
+  else
+    print_message "$RED" "Cannot find activation script. Virtual environment may be corrupted."
     exit 1
-  }
+  fi
+fi
+
+# Check if Open WebUI is installed - with broken pipe handling
+print_message "$YELLOW" "Checking Open WebUI installation status..."
+if ! { pip list 2>/dev/null || python -m pip list 2>/dev/null; } | grep -q "open-webui"; then
+  print_message "$YELLOW" "Installing Open WebUI..."
+  set +e  # Temporarily disable exit on error
+  uv pip install open-webui
+  PIP_RESULT=$?
+  set -e  # Re-enable exit on error
+  
+  if [ $PIP_RESULT -ne 0 ]; then
+    print_message "$YELLOW" "Primary installation method failed, trying alternative method..."
+    python -m pip install open-webui || {
+      print_message "$RED" "Failed to install Open WebUI."
+      exit 1
+    }
+  fi
 else
   print_message "$GREEN" "Open WebUI is already installed. Checking for updates..."
-  uv pip install --upgrade open-webui || {
-    print_message "$YELLOW" "Could not upgrade Open WebUI, continuing with installed version."
-  }
+  set +e  # Temporarily disable exit on error
+  uv pip install --upgrade open-webui
+  UPGRADE_RESULT=$?
+  set -e  # Re-enable exit on error
+  
+  if [ $UPGRADE_RESULT -ne 0 ]; then
+    print_message "$YELLOW" "Could not upgrade Open WebUI with uv, trying with pip..."
+    python -m pip install --upgrade open-webui || {
+      print_message "$YELLOW" "Could not upgrade Open WebUI, continuing with installed version."
+    }
+  fi
 fi
 
 # Return to the original directory
@@ -229,8 +317,16 @@ cd - > /dev/null
 print_message "$GREEN" "✅ Setup complete!"
 print_message "$GREEN" "Ollama is set up with Qwen2.5-Coder with 128k context window."
 print_message "$GREEN" "OpenWebUI is installed and ready to use."
+
+# Display AMD-specific message if AMD GPU was detected
+if lspci | grep -i amd | grep -i vga > /dev/null; then
+  print_message "$GREEN" "AMD GPU support has been configured for Ubuntu 24.04."
+  print_message "$YELLOW" "Note: The ROCm/AMDGPU support for Ubuntu 24.04 is still evolving."
+  print_message "$YELLOW" "If you encounter issues, please check for updates from AMD for Ubuntu 24.04."
+fi
+
 print_message "$YELLOW" "To run the model directly: ollama run qwen2.5-coder-128k"
 print_message "$YELLOW" "To run Open WebUI, go to $OPENWEBUI_DIR, activate the environment and run:"
-print_message "$YELLOW" "cd $OPENWEBUI_DIR && source .venv/bin/activate && open-webui serve"
+print_message "$YELLOW" "cd $OPENWEBUI_DIR && source open-webui/bin/activate && open-webui serve"
 print_message "$YELLOW" "Then access Open WebUI at http://localhost:8080"
 print_message "$YELLOW" "For Ubuntu, be cautious with very large contexts as they may require significant memory."
