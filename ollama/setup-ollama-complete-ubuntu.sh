@@ -1,8 +1,6 @@
 #!/bin/bash
-
 # Combined script to set up Ollama with Qwen2.5-Coder:7b (128k context) and OpenWebUI for Ubuntu 24.04
 # This script is idempotent and will stop on any errors
-
 set -e  # Exit immediately if a command exits with a non-zero status
 
 # Define colors for output
@@ -67,7 +65,7 @@ if ! command_exists ollama; then
   if ! command_exists ollama; then
     print_message "$RED" "Failed to install Ollama. Please try installing manually."
     exit 1
-  fi
+  }
   
   print_message "$GREEN" "Ollama installed successfully!"
 else
@@ -105,7 +103,7 @@ if ! ollama list | grep -q "qwen2.5-coder:7b"; then
   if ! ollama list | grep -q "qwen2.5-coder:7b"; then
     print_message "$RED" "Failed to pull qwen2.5-coder:7b model."
     exit 1
-  fi
+  }
   
   print_message "$GREEN" "qwen2.5-coder:7b model pulled successfully!"
 else
@@ -136,7 +134,7 @@ else
     print_message "$RED" "Failed to create qwen2.5-coder-128k model."
     rm -rf "$TEMP_DIR"
     exit 1
-  fi
+  }
   
   print_message "$GREEN" "qwen2.5-coder-128k model created successfully!"
 fi
@@ -149,7 +147,7 @@ print_message "$YELLOW" "Setting up AMD GPU support for Ubuntu 24.04 (Noble Numb
 
 # Check for AMD GPU
 if lspci | grep -i amd | grep -i vga > /dev/null; then
-  print_message "$GREEN" "AMD GPU detected. Installing latest supported AMD GPU drivers..."
+  print_message "$GREEN" "AMD GPU detected. Installing AMD GPU drivers without DKMS..."
   
   # Setup proper repository keys
   if [ ! -f "/etc/apt/keyrings/rocm.gpg" ]; then
@@ -180,7 +178,7 @@ if lspci | grep -i amd | grep -i vga > /dev/null; then
   
   sudo apt update
   
-  # Install ROCm components but not with DKMS to avoid kernel module issues
+  # Install ROCm components WITHOUT DKMS to avoid kernel module issues
   print_message "$YELLOW" "Installing ROCm components (without DKMS)..."
   sudo amdgpu-install --usecase=rocm --no-dkms -y || {
     print_message "$RED" "Failed to install ROCm components."
@@ -190,19 +188,49 @@ if lspci | grep -i amd | grep -i vga > /dev/null; then
     }
   }
   
-  # Set up AMD GPU optimizations in shell profile
-  SHELL_PROFILE="$HOME/.bashrc"
-  OPTIMIZATION_VARS="export OLLAMA_FLASH_ATTENTION=1\nexport OLLAMA_KV_CACHE_TYPE=q8_0\nexport OLLAMA_MAX_INPUT_TOKENS=131072\nexport OLLAMA_CONTEXT_LENGTH=131072\nexport OLLAMA_ROCM=1"
+  # Create Ollama systemd service override with HSA_OVERRIDE_GFX_VERSION for RDNA2 / 6800XT
+  print_message "$YELLOW" "Creating systemd service override for Ollama with GPU optimizations..."
+  
+  # Check if Ollama is running as a systemd service
+  if systemctl is-active --quiet ollama; then
+    # Create directory for the override file if it doesn't exist
+    sudo mkdir -p /etc/systemd/system/ollama.service.d/
+    
+    # Create the override.conf file with all optimization variables
+    cat > /tmp/ollama-override.conf << 'EOF'
+[Service]
+Environment="HSA_OVERRIDE_GFX_VERSION=10.3.0"
+Environment="OLLAMA_ROCM=1"
+Environment="OLLAMA_FLASH_ATTENTION=1"
+Environment="OLLAMA_KV_CACHE_TYPE=q8_0"
+Environment="OLLAMA_MAX_INPUT_TOKENS=131072"
+Environment="OLLAMA_CONTEXT_LENGTH=131072"
+EOF
+
+    # Install the override file
+    sudo cp /tmp/ollama-override.conf /etc/systemd/system/ollama.service.d/override.conf
+    
+    # Reload systemd and restart Ollama
+    print_message "$YELLOW" "Reloading systemd and restarting Ollama service..."
+    sudo systemctl daemon-reload
+    sudo systemctl restart ollama
+    
+    print_message "$GREEN" "Ollama systemd service configured for AMD GPU acceleration."
+  else
+    # If not running as a service, set up shell profile for user sessions
+    SHELL_PROFILE="$HOME/.bashrc"
+    OPTIMIZATION_VARS="export HSA_OVERRIDE_GFX_VERSION=10.3.0\nexport OLLAMA_ROCM=1\nexport OLLAMA_FLASH_ATTENTION=1\nexport OLLAMA_KV_CACHE_TYPE=q8_0\nexport OLLAMA_MAX_INPUT_TOKENS=131072\nexport OLLAMA_CONTEXT_LENGTH=131072"
+  fi
 else
-  # Set up standard memory optimizations
+  # Set up standard memory optimizations for non-AMD systems
   SHELL_PROFILE="$HOME/.bashrc"
   OPTIMIZATION_VARS="export OLLAMA_FLASH_ATTENTION=1\nexport OLLAMA_KV_CACHE_TYPE=q8_0\nexport OLLAMA_MAX_INPUT_TOKENS=131072\nexport OLLAMA_CONTEXT_LENGTH=131072"
 fi
 
 # Check if optimizations are already in shell profile
-if ! grep -q "OLLAMA_FLASH_ATTENTION" "$SHELL_PROFILE" || ! grep -q "OLLAMA_KV_CACHE_TYPE" "$SHELL_PROFILE" || ! grep -q "OLLAMA_MAX_INPUT_TOKENS" "$SHELL_PROFILE" || (lspci | grep -i amd | grep -i vga > /dev/null && ! grep -q "OLLAMA_ROCM" "$SHELL_PROFILE"); then
+if ! grep -q "HSA_OVERRIDE_GFX_VERSION" "$SHELL_PROFILE" || ! grep -q "OLLAMA_ROCM" "$SHELL_PROFILE" || ! grep -q "OLLAMA_FLASH_ATTENTION" "$SHELL_PROFILE" || ! grep -q "OLLAMA_KV_CACHE_TYPE" "$SHELL_PROFILE"; then
   print_message "$YELLOW" "Adding optimization variables to $SHELL_PROFILE..."
-  echo -e "\n# Ollama optimizations for large context windows" >> "$SHELL_PROFILE"
+  echo -e "\n# Ollama optimizations for large context windows and AMD GPU" >> "$SHELL_PROFILE"
   echo -e "$OPTIMIZATION_VARS" >> "$SHELL_PROFILE"
   print_message "$GREEN" "Optimization variables added to $SHELL_PROFILE."
   print_message "$YELLOW" "Please run 'source $SHELL_PROFILE' to apply these changes to your current shell."
@@ -265,6 +293,7 @@ fi
 # Activate the virtual environment with error handling for broken pipe
 print_message "$YELLOW" "Activating virtual environment..."
 { source open-webui/bin/activate > /dev/null 2>&1 || true; } 
+
 # Check if activation was successful by verifying Python path
 if [[ "$(which python)" != *"open-webui"* ]]; then
   print_message "$RED" "Failed to activate virtual environment. Trying alternative method..."
@@ -320,9 +349,10 @@ print_message "$GREEN" "OpenWebUI is installed and ready to use."
 
 # Display AMD-specific message if AMD GPU was detected
 if lspci | grep -i amd | grep -i vga > /dev/null; then
-  print_message "$GREEN" "AMD GPU support has been configured for Ubuntu 24.04."
+  print_message "$GREEN" "AMD GPU support has been configured for Ubuntu 24.04 with the override variables."
   print_message "$YELLOW" "Note: The ROCm/AMDGPU support for Ubuntu 24.04 is still evolving."
-  print_message "$YELLOW" "If you encounter issues, please check for updates from AMD for Ubuntu 24.04."
+  print_message "$YELLOW" "This script has configured Ollama to recognize your 6800XT without DKMS using HSA_OVERRIDE_GFX_VERSION."
+  print_message "$YELLOW" "You can verify GPU usage with 'sudo apt install radeontop' and then running 'radeontop'."
 fi
 
 print_message "$YELLOW" "To run the model directly: ollama run qwen2.5-coder-128k"
