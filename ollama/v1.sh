@@ -65,7 +65,7 @@ if ! command_exists ollama; then
   if ! command_exists ollama; then
     print_message "$RED" "Failed to install Ollama. Please try installing manually."
     exit 1
-  }
+  fi
   
   print_message "$GREEN" "Ollama installed successfully!"
 else
@@ -103,7 +103,7 @@ if ! ollama list | grep -q "qwen2.5-coder:7b"; then
   if ! ollama list | grep -q "qwen2.5-coder:7b"; then
     print_message "$RED" "Failed to pull qwen2.5-coder:7b model."
     exit 1
-  }
+  fi
   
   print_message "$GREEN" "qwen2.5-coder:7b model pulled successfully!"
 else
@@ -134,7 +134,7 @@ else
     print_message "$RED" "Failed to create qwen2.5-coder-128k model."
     rm -rf "$TEMP_DIR"
     exit 1
-  }
+  fi
   
   print_message "$GREEN" "qwen2.5-coder-128k model created successfully!"
 fi
