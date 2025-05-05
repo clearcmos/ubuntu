@@ -1,0 +1,10 @@
+docker run -d \
+  --device /dev/kfd \
+  --device /dev/dri \
+  -v ollama:/root/.ollama \
+  -p 11434:11434 \
+  --restart unless-stopped \
+  --env HSA_OVERRIDE_GFX_VERSION="10.3.0" \
+  --env OLLAMA_KEEP_ALIVE="-1" \
+  --name ollama-rocm \
+  ollama/ollama:rocm
