@@ -1,28 +1,4 @@
-# Ollama & Open WebUI Deployment With AMD GPU on Ubuntu
-
-1. **General Formatting and Readability**:
-   - Ensure consistent formatting for commands and code blocks.
-   - Use Markdown headers appropriately to break down sections.
-
-2. **Code Blocks**:
-   - Use triple backticks (```sh) consistently for shell commands.
-   - For YAML, use ```yaml.
-
-3. **Environment Variable Explanation**:
-   - Explain what each environment variable does, especially those that are not standard (e.g., `RENDER_GROUP_ID`).
-
-4. **Error Handling and Troubleshooting**:
-   - Provide some basic troubleshooting tips or error messages to help users if something goes wrong.
-
-5. **Dependencies and Prerequisites**:
-   - List any dependencies or prerequisites that are not covered in the guide, such as hardware requirements for ROCm.
-
-6. **Security Considerations**:
-   - Mention any security considerations, especially when dealing with Docker and custom models.
-
-Here's an updated version of your `README.md` with these improvements:
-
-# Ollama & Open WebUI Deployment With AMD GPU on Ubuntu
+# Ollama & Open WebUI Deployment With 6800XT AMD GPU on Ubuntu 24.04.2 LTS
 
 ## Prerequisites
 Before proceeding, ensure you have the following:
