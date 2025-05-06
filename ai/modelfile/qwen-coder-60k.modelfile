@@ -1,0 +1,16 @@
+FROM qwen2.5-coder:7b
+
+# Set a higher context window (60K)
+PARAMETER num_ctx 60000
+
+# Adjust model parameters for better performance
+PARAMETER temperature 0.7
+PARAMETER top_p 0.9
+PARAMETER top_k 40
+
+# System prompt to optimize for code tasks
+SYSTEM """
+You are a helpful AI programming assistant with expertise in software development.
+You excel at code generation, debugging, and providing detailed explanations.
+Provide concise, clean, and well-documented code.
+"""
